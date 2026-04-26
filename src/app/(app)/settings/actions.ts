@@ -7,12 +7,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { communities } from "@/db/schema/communities";
 import { creators, skoolCredentials } from "@/db/schema/creators";
-import {
-  encrypt,
-  parseSkoolCookies,
-  serializeSkoolCookies,
-  type SkoolCookies,
-} from "@/lib/crypto";
+import { encrypt, serializeSkoolCookies, type SkoolCookies } from "@/lib/crypto";
 import { requireSession } from "@/lib/server/creator";
 import {
   SkoolAuthError,
@@ -187,34 +182,7 @@ export async function setTranscriptionEnabled(enabled: boolean) {
   revalidatePath("/settings");
 }
 
-// ---------------------------------------------------------------------------
-// Read decrypted cookies on the server only. Never returned to clients.
-// ---------------------------------------------------------------------------
-
-export async function loadDecryptedCookiesForCreator(
-  creatorId: string,
-): Promise<SkoolCookies | null> {
-  const [row] = await db
-    .select()
-    .from(skoolCredentials)
-    .where(eq(skoolCredentials.creatorId, creatorId));
-  if (!row || row.status !== "active") return null;
-  const plaintext = (function decryptOrNull() {
-    try {
-      // Localised import keeps client bundles from pulling node:crypto.
-      // (This file is "use server" so it never bundles to the client,
-      // but the explicit boundary is cheap insurance.)
-      const { decrypt } = require("@/lib/crypto") as typeof import("@/lib/crypto");
-      return decrypt({
-        ciphertext: row.ciphertext,
-        iv: row.iv,
-        authTag: row.authTag,
-        keyVersion: row.keyVersion,
-      });
-    } catch {
-      return null;
-    }
-  })();
-  if (!plaintext) return null;
-  return parseSkoolCookies(plaintext);
-}
+// Decrypted-cookie loading lives in src/lib/server/skool-credentials.ts.
+// It deliberately is NOT a server action — every function exported from
+// a "use server" file is auto-exposed as a POST endpoint, and that helper
+// takes a creator ID without authorizing the caller.
