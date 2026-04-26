@@ -12,16 +12,22 @@ import {
 } from "@/lib/skool-api";
 
 import { flattenTreeForLessons, normaliseLesson } from "./lessons";
+import {
+  discoverMembersFromAnalytics,
+  recomputeLessonCompletion,
+  syncProgressionForKnownMembers,
+} from "./members";
 
 // One-stop sync for a single community. Reused by:
 //   - the Vercel cron at /api/cron/sync (every 6h)
 //   - the manual "Refresh now" button on /drop-off
 //   - (later) the connect-Skool flow which fires a first sync on success
 //
-// Day 4 scope: pulls courses + lessons via the two endpoints we know
-// work from recon (listGroupCourses + getCourseTree). Per-member
-// progression is wired in Day 5 once member discovery is figured out;
-// `members_upserted` and `progress_upserted` stay at 0 until then.
+// Day 4: course list + lesson trees via listGroupCourses + getCourseTree.
+// Day 5: member discovery (analytics harvest), per-member progression
+// sync, and per-lesson completion-% aggregation. Each Day 5 step is
+// best-effort — a failure produces a warning and the run is marked
+// 'partial' rather than 'failed'.
 
 export type SyncTrigger = "cron" | "manual" | "connect";
 export type SyncStatus = "running" | "succeeded" | "partial" | "failed";
@@ -112,6 +118,7 @@ export async function syncCommunity(opts: SyncOptions): Promise<SyncRunSummary> 
   const warnings: SyncWarning[] = [];
 
   try {
+    // --- Step A: course + lesson structure --------------------------------
     const courseList = await client.listGroupCourses(opts.skoolGroupId);
     counters.apiCalls += 1;
 
@@ -134,6 +141,67 @@ export async function syncCommunity(opts: SyncOptions): Promise<SyncRunSummary> 
           detail: { skoolCourseId: skoolCourse.id },
         });
       }
+    }
+
+    // --- Step B: member discovery (analytics harvest) ---------------------
+    // Best-effort. Skool deliberately hides the member list (master plan
+    // Part 4), so we scrape UUID-shaped IDs from analytics responses.
+    // CSV import in Settings remains the deterministic path.
+    try {
+      const discovered = await discoverMembersFromAnalytics(client, {
+        communityId: opts.communityId,
+        skoolGroupId: opts.skoolGroupId,
+      });
+      counters.apiCalls += discovered.apiCalls;
+      counters.membersUpserted += discovered.upserted;
+      for (const w of discovered.warnings) {
+        warnings.push({
+          step: w.step,
+          message: w.message,
+        });
+      }
+    } catch (err) {
+      // Auth errors bubble up (cookies expired) — caught by outer catch.
+      if (err instanceof SkoolError) throw err;
+      warnings.push({
+        step: "discover_members",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // --- Step C: per-member progression -----------------------------------
+    try {
+      const progression = await syncProgressionForKnownMembers(client, {
+        communityId: opts.communityId,
+        skoolGroupId: opts.skoolGroupId,
+      });
+      counters.apiCalls += progression.apiCalls;
+      counters.progressUpserted += progression.upserted;
+      for (const w of progression.warnings) {
+        warnings.push({
+          step: w.step,
+          message: w.message,
+          detail: w.detail,
+        });
+      }
+    } catch (err) {
+      if (err instanceof SkoolError) throw err;
+      warnings.push({
+        step: "sync_progression",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // --- Step D: per-lesson completion % aggregation ----------------------
+    // Pure DB read+write, no Skool API calls — runs even if upstream
+    // steps had warnings, so the UI shows what we know.
+    try {
+      await recomputeLessonCompletion(opts.communityId);
+    } catch (err) {
+      warnings.push({
+        step: "aggregate_completion",
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
 
     await db
