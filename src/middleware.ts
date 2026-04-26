@@ -12,6 +12,10 @@ const PUBLIC_PATHS = [
 
 const PUBLIC_PREFIXES = [
   "/api/auth",
+  // Cron endpoints authenticate via Bearer ${CRON_SECRET}, not session
+  // cookies. Letting middleware redirect them would 302 the cron call
+  // to /sign-in and the sync would never run.
+  "/api/cron",
   "/help",
   "/_next",
   "/favicon.ico",
