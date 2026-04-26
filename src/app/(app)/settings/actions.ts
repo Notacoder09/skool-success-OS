@@ -124,8 +124,10 @@ export async function connectSkool(formData: FormData): Promise<ConnectResult> {
       },
     });
 
-  // Upsert the primary community row from what the verification call
-  // returned. Course-tree sync runs as a separate job in Days 4-7.
+  // Upsert the primary community row. lastSyncedAt deliberately stays
+  // null here — it gets set by syncCommunity() when a real sync run
+  // completes. The Drop-Off Map page nudges the creator to "Refresh
+  // now" if no sync has happened yet.
   await db
     .insert(communities)
     .values({
@@ -133,13 +135,11 @@ export async function connectSkool(formData: FormData): Promise<ConnectResult> {
       skoolGroupId: groupId,
       name: firstCourseTitle ?? null,
       isPrimary: true,
-      lastSyncedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [communities.creatorId, communities.skoolGroupId],
       set: {
         name: firstCourseTitle ?? null,
-        lastSyncedAt: new Date(),
       },
     });
 

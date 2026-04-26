@@ -12,6 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const connected = community
     ? {
         name: community.name ?? "Your community",
+        synced: community.lastSyncedAt !== null,
         lastSyncedLabel: community.lastSyncedAt
           ? `synced ${formatRelative(community.lastSyncedAt)}`
           : "not synced yet",

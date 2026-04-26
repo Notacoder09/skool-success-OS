@@ -47,7 +47,11 @@ const NAV: NavGroup[] = [
 export function SidebarNav({
   connectedCommunity,
 }: {
-  connectedCommunity: { name: string; lastSyncedLabel: string } | null;
+  connectedCommunity: {
+    name: string;
+    lastSyncedLabel: string;
+    synced: boolean;
+  } | null;
 }) {
   const pathname = usePathname() ?? "";
 
@@ -106,7 +110,12 @@ export function SidebarNav({
         <div className="mt-0.5 text-xs text-muted">
           {connectedCommunity ? (
             <>
-              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-forest align-middle" />
+              <span
+                aria-hidden
+                className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                  connectedCommunity.synced ? "bg-forest" : "bg-rule"
+                }`}
+              />
               {connectedCommunity.lastSyncedLabel}
             </>
           ) : (
