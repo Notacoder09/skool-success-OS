@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { and, eq, isNotNull } from "drizzle-orm";
 
+import { db } from "@/db";
+import { members } from "@/db/schema/communities";
 import {
   getCurrentCreator,
   getPrimaryCommunity,
@@ -8,6 +11,7 @@ import {
 } from "@/lib/server/creator";
 
 import { DisconnectButton } from "./DisconnectButton";
+import { MembersImportCard } from "./MembersImportCard";
 import { SkoolConnectForm } from "./SkoolConnectForm";
 import { TranscriptionToggle } from "./TranscriptionToggle";
 
@@ -20,13 +24,33 @@ export default async function SettingsPage() {
     getPrimaryCommunity(creator.creatorId),
   ]);
 
+  let memberCount = 0;
+  let membersWithSkoolId = 0;
+  if (community) {
+    const total = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.communityId, community.id));
+    memberCount = total.length;
+    const withId = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(
+        and(
+          eq(members.communityId, community.id),
+          isNotNull(members.skoolMemberId),
+        ),
+      );
+    membersWithSkoolId = withId.length;
+  }
+
   return (
     <div className="max-w-3xl">
       <header>
         <p className="text-xs uppercase tracking-[0.18em] text-muted">Settings</p>
         <h1 className="mt-2 font-display text-4xl">Your setup.</h1>
         <p className="mt-2 text-base text-muted">
-          Three small things to set up. Once they&apos;re in place, everything
+          A few small things to set up. Once they&apos;re in place, everything
           else runs in the background.
         </p>
       </header>
@@ -46,8 +70,21 @@ export default async function SettingsPage() {
         )}
       </Section>
 
+      {connection.connected ? (
+        <Section
+          kicker="02"
+          title="Members"
+          description="Skool deliberately hides the full member list from owners — even you. Upload a CSV export so we can email flashcards and (when the file includes member IDs) sync per-member progression."
+        >
+          <MembersImportCard
+            currentMemberCount={memberCount}
+            membersWithSkoolId={membersWithSkoolId}
+          />
+        </Section>
+      ) : null}
+
       <Section
-        kicker="02"
+        kicker={connection.connected ? "03" : "02"}
         title="Flashcards"
         description="Default ON for your members. The behaviour below controls only the auto-transcription fallback that turns video-only lessons into flashcards."
       >
@@ -58,7 +95,7 @@ export default async function SettingsPage() {
       </Section>
 
       <Section
-        kicker="03"
+        kicker={connection.connected ? "04" : "03"}
         title="Schedule"
         description="Your weekly optimization report lands Monday 7 AM in your local time. Detected from your browser; change here if needed."
       >
