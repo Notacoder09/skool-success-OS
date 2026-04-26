@@ -8,6 +8,13 @@
       "when": 1777160094876,
       "tag": "0000_brown_pixie",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777162341925,
+      "tag": "0001_spotty_firebrand",
+      "breakpoints": true
     }
   ]
 }
