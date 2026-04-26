@@ -58,7 +58,7 @@ export function SidebarNav({
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-rule bg-canvas">
       <div className="px-6 pb-8 pt-6">
-        <Link href="/today" aria-label="Skool Success">
+        <Link href="/today" aria-label="CourseSuccess">
           <Logo />
         </Link>
       </div>

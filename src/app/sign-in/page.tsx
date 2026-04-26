@@ -32,7 +32,7 @@ export default async function SignInPage({
       </div>
 
       <h1 className="font-display text-3xl leading-tight">
-        Sign in to <em className="not-italic">Skool Success</em>.
+        Sign in to <em className="not-italic">CourseSuccess</em>.
       </h1>
       <p className="mt-3 text-base text-muted">
         We&apos;ll email you a one-time link. No password to remember.

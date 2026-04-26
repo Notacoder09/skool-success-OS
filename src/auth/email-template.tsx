@@ -16,13 +16,13 @@ const CANVAS = "#fafaf7";
 
 export function buildMagicLinkEmail(opts: {
   url: string;
-  /** ISO host the link points at, e.g. "skoolsuccess.os" — shown for trust. */
+  /** ISO host the link points at, e.g. "coursesuccess.io" — shown for trust. */
   host: string;
   /** Optional first name for greeting; falls back to a neutral opener. */
   name?: string | null;
 }): MagicLinkContent {
   const greeting = opts.name ? `Hi ${escapeHtml(opts.name)},` : "Hi there,";
-  const subject = "Your sign-in link for Skool Success OS";
+  const subject = "Your sign-in link for CourseSuccess OS";
 
   const html = `<!doctype html>
 <html lang="en">
@@ -30,7 +30,7 @@ export function buildMagicLinkEmail(opts: {
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;margin:0 auto;">
       <tr>
         <td style="padding:8px 0 24px 0;">
-          <span style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:${MUTED};">Skool<span style="color:${ACCENT};">Success</span></span>
+          <span style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:${MUTED};">Course<span style="color:${ACCENT};">Success</span></span>
         </td>
       </tr>
       <tr>
@@ -43,7 +43,7 @@ export function buildMagicLinkEmail(opts: {
             <a href="${escapeAttr(opts.url)}"
                style="display:inline-block;background-color:${INK};color:${CANVAS};
                       text-decoration:none;font-size:15px;padding:12px 20px;border-radius:8px;">
-              Sign in to Skool Success OS
+              Sign in to CourseSuccess OS
             </a>
           </p>
           <p style="margin:0 0 8px 0;font-size:13px;color:${MUTED};line-height:1.5;">
@@ -66,7 +66,7 @@ export function buildMagicLinkEmail(opts: {
   const text = [
     greeting,
     "",
-    "Click the link below to sign in to Skool Success OS.",
+    "Click the link below to sign in to CourseSuccess OS.",
     "It's valid for 10 minutes and works once.",
     "",
     opts.url,

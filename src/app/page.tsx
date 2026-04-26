@@ -13,13 +13,13 @@ export default async function HomePage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
       <p className="text-sm uppercase tracking-[0.18em] text-muted">
-        Skool<span className="text-terracotta">Success</span> &middot; Founding · v0
+        Course<span className="text-terracotta">Success</span> &middot; Founding · v0
       </p>
       <h1 className="mt-6 font-display text-5xl leading-tight">
         Help your community actually <em>finish</em> what they started.
       </h1>
       <p className="mt-6 max-w-xl text-lg text-muted">
-        Better retention, less churn, members who stick around. Skool Success OS catches
+        Better retention, less churn, members who stick around. CourseSuccess OS catches
         members before they cancel, fixes the lessons people drop off on, and ships
         student-facing flashcards by email — without making you log into yet another dashboard
         daily.

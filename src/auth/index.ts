@@ -15,7 +15,7 @@ import { buildMagicLinkEmail } from "./email-template";
 // sendVerificationRequest so the email matches the V2 design
 // (terracotta accent, lowercase wordmark, one-paragraph copy).
 
-const fromAddress = process.env.RESEND_FROM ?? "Skool Success OS <onboarding@resend.dev>";
+const fromAddress = process.env.RESEND_FROM ?? "CourseSuccess OS <onboarding@resend.dev>";
 
 export const authConfig = {
   adapter: DrizzleAdapter(db, {
