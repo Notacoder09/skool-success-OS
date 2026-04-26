@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import {
@@ -105,20 +106,33 @@ function ConnectedCard({
   lastVerifiedAt: Date | null;
 }) {
   return (
-    <div className="flex items-start justify-between gap-6">
-      <div>
-        <div className="flex items-center gap-2 text-sm font-medium text-ink">
-          <span className="inline-block h-2 w-2 rounded-full bg-forest" />
-          Connected{communityName ? ` — ${communityName}` : ""}
+    <div>
+      <div className="flex items-start justify-between gap-6">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-medium text-ink">
+            <span className="inline-block h-2 w-2 rounded-full bg-forest" />
+            Connected{communityName ? ` — ${communityName}` : ""}
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            Last verified{" "}
+            {lastVerifiedAt
+              ? lastVerifiedAt.toLocaleString()
+              : "—"}
+          </div>
         </div>
-        <div className="mt-1 text-xs text-muted">
-          Last verified{" "}
-          {lastVerifiedAt
-            ? lastVerifiedAt.toLocaleString()
-            : "—"}
-        </div>
+        <DisconnectButton />
       </div>
-      <DisconnectButton />
+      <p className="mt-4 max-w-xl text-xs leading-relaxed text-muted">
+        The sidebar name may show your first course title until we sync a
+        proper community label. <strong className="text-ink">Today</strong> and{" "}
+        <strong className="text-ink">Pulse</strong> stay honest placeholders
+        until those build days ship. To pull your course outline into the app
+        now, open{" "}
+        <Link href="/drop-off" className="text-ink underline-offset-4 hover:underline">
+          Drop-Off Map
+        </Link>{" "}
+        and tap <strong className="text-ink">Refresh now</strong> once.
+      </p>
     </div>
   );
 }

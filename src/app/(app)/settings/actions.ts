@@ -145,6 +145,7 @@ export async function connectSkool(formData: FormData): Promise<ConnectResult> {
 
   revalidatePath("/settings");
   revalidatePath("/today");
+  revalidatePath("/drop-off");
   return { ok: true, communityName: firstCourseTitle };
 }
 
@@ -167,6 +168,7 @@ export async function disconnectSkool() {
 
   revalidatePath("/settings");
   revalidatePath("/today");
+  revalidatePath("/drop-off");
 }
 
 // ---------------------------------------------------------------------------

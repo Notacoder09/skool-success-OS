@@ -45,13 +45,27 @@ export default function ConnectSkoolHelp() {
         </ul>
       </Step>
 
-      <Step n="4" title="Find your Group ID">
-        Stay in DevTools and switch to the <strong>Network</strong> tab.
-        Filter by <code className="font-mono">api2.skool.com</code> and click
-        around your community for a moment. Any request URL that starts with{" "}
-        <code className="font-mono">/groups/</code> contains your group
-        ID — the 32-character hex string right after{" "}
-        <code className="font-mono">/groups/</code>. Copy that.
+      <Step n="4" title="Find your Group ID (pick whichever is easier)">
+        <p className="mb-3">
+          <strong className="text-ink">Easiest for most creators:</strong> in
+          Skool, open your community, then go to{" "}
+          <strong className="text-ink">Settings</strong> (gear). Under{" "}
+          <strong className="text-ink">Billing</strong> and/or{" "}
+          <strong className="text-ink">Course</strong> settings, Skool often
+          shows your <strong className="text-ink">Group ID</strong> as a
+          32-character hex string — copy that into our form. (Skool&apos;s UI
+          moves sometimes; if you don&apos;t see it there, use the DevTools
+          method below.)
+        </p>
+        <p>
+          <strong className="text-ink">Alternative:</strong> in DevTools, open
+          the <strong>Network</strong> tab, filter by{" "}
+          <code className="font-mono">api2.skool.com</code>, and click around
+          your community. Any request URL that starts with{" "}
+          <code className="font-mono">/groups/</code> contains your group ID —
+          the hex string right after <code className="font-mono">/groups/</code>
+          .
+        </p>
       </Step>
 
       <Step n="5" title="Paste all three back into Settings">

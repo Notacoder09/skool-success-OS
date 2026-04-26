@@ -1,10 +1,12 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { connectSkool, type ConnectResult } from "./actions";
 
 export function SkoolConnectForm() {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<ConnectResult | null>(null);
 
@@ -12,6 +14,10 @@ export function SkoolConnectForm() {
     startTransition(async () => {
       const r = await connectSkool(form);
       setResult(r);
+      // Server action updates the DB, but this page was rendered as
+      // "not connected". Refresh RSC payload so ConnectedCard + sidebar
+      // update without a manual full reload.
+      if (r.ok) router.refresh();
     });
   }
 
@@ -35,7 +41,7 @@ export function SkoolConnectForm() {
         label="Group ID"
         name="groupId"
         placeholder="ca1d1972c55b437b..."
-        hint="32-char hex from any admin or analytics network request URL on Skool."
+        hint="32-char hex: Skool → your community → Settings → Billing or Course settings (often shown there). Or copy from a /groups/… URL in DevTools → Network."
         error={result && !result.ok && result.field === "groupId" ? result.error : undefined}
       />
 
