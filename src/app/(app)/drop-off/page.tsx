@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 
 import { db } from "@/db";
-import { courses, lessons } from "@/db/schema/communities";
+import { courses, lessons, members } from "@/db/schema/communities";
 import { syncRuns } from "@/db/schema/sync";
+import { toneForCompletion } from "@/lib/sync";
 import {
   getCurrentCreator,
   getPrimaryCommunity,
@@ -13,15 +14,23 @@ import {
 
 import { RefreshNowButton } from "./RefreshNowButton";
 
-// Drop-Off Map (Feature 1, master plan §"Days 4-7"). Day 4 ships the
-// page shell + course/lesson structure pulled by the sync layer.
-// Per-lesson completion percentages and AI insights land Days 5-7
-// once member discovery + progression aggregation are wired.
+// Drop-Off Map (Feature 1, master plan §"Days 4-7"). Day 4 shipped the
+// page shell + course/lesson structure. Day 5 fills cells with real
+// completion %, computes "main leak" per course, and shows progression
+// state honestly.
 //
 // Mockup reference: docs/mockups/02-drop-off-map.png. Voice + thresholds:
 // docs/creator-wisdom-and-product-decisions.md.
 
 export const dynamic = "force-dynamic";
+
+interface LessonRow {
+  id: string;
+  courseId: string;
+  title: string;
+  position: number;
+  completionPct: string | null;
+}
 
 export default async function DropOffPage() {
   const creator = await getCurrentCreator();
@@ -51,7 +60,7 @@ export default async function DropOffPage() {
     .where(eq(courses.communityId, community.id))
     .orderBy(asc(courses.createdAt));
 
-  const lessonRows =
+  const lessonRows: LessonRow[] =
     courseRows.length > 0
       ? await db
           .select({
@@ -77,19 +86,39 @@ export default async function DropOffPage() {
       startedAt: syncRuns.startedAt,
       finishedAt: syncRuns.finishedAt,
       errorMessage: syncRuns.errorMessage,
+      membersUpserted: syncRuns.membersUpserted,
+      progressUpserted: syncRuns.progressUpserted,
     })
     .from(syncRuns)
     .where(eq(syncRuns.communityId, community.id))
     .orderBy(desc(syncRuns.startedAt))
     .limit(1);
 
-  const lessonsByCourse = new Map<string, typeof lessonRows>();
+  const memberStats = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(eq(members.communityId, community.id));
+  const memberCount = memberStats.length;
+
+  const memberIdStats = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(
+      and(
+        eq(members.communityId, community.id),
+        isNotNull(members.skoolMemberId),
+      ),
+    );
+  const membersWithProgressionId = memberIdStats.length;
+
+  const lessonsByCourse = new Map<string, LessonRow[]>();
   for (const l of lessonRows) {
     const arr = lessonsByCourse.get(l.courseId) ?? [];
     arr.push(l);
     lessonsByCourse.set(l.courseId, arr);
   }
 
+  const hasAnyProgression = lessonRows.some((l) => l.completionPct !== null);
   const totalLessons = lessonRows.length;
 
   return (
@@ -107,7 +136,8 @@ export default async function DropOffPage() {
           <div className="text-right text-xs text-muted">
             <div>
               {courseRows.length} {plural("course", courseRows.length)} ·{" "}
-              {totalLessons} {plural("lesson", totalLessons)}
+              {totalLessons} {plural("lesson", totalLessons)} ·{" "}
+              {memberCount} {plural("member", memberCount)}
             </div>
             <div className="mt-1">{lastRunLabel(lastRun)}</div>
           </div>
@@ -119,7 +149,13 @@ export default async function DropOffPage() {
         <FirstSyncCard lastRun={lastRun} />
       ) : (
         <>
-          <ProgressionPendingCard />
+          <DataStateBanner
+            memberCount={memberCount}
+            membersWithProgressionId={membersWithProgressionId}
+            hasAnyProgression={hasAnyProgression}
+            lastRun={lastRun}
+            lessonRows={lessonRows}
+          />
           <CoursesSection courseRows={courseRows} lessonsByCourse={lessonsByCourse} />
         </>
       )}
@@ -160,11 +196,13 @@ function NotConnectedState() {
 function FirstSyncCard({
   lastRun,
 }: {
-  lastRun: {
-    status: string;
-    startedAt: Date;
-    errorMessage: string | null;
-  } | undefined;
+  lastRun:
+    | {
+        status: string;
+        startedAt: Date;
+        errorMessage: string | null;
+      }
+    | undefined;
 }) {
   const failed = lastRun?.status === "failed";
   return (
@@ -193,26 +231,121 @@ function FirstSyncCard({
   );
 }
 
-function ProgressionPendingCard() {
-  // Honest stand-in for the AI insight card from the mockup. Day 5
-  // wires per-member progression and the AI insight; until then we
-  // refuse to display made-up percentages or a fake insight.
+// State-aware banner that replaces the static "Coming Day 5" card.
+// Tells the creator exactly what's missing and how to unblock.
+function DataStateBanner({
+  memberCount,
+  membersWithProgressionId,
+  hasAnyProgression,
+  lastRun,
+  lessonRows,
+}: {
+  memberCount: number;
+  membersWithProgressionId: number;
+  hasAnyProgression: boolean;
+  lastRun: { status: string } | undefined;
+  lessonRows: LessonRow[];
+}) {
+  // 1. No members at all → push to CSV import.
+  if (memberCount === 0) {
+    return (
+      <BannerCard tone="warn" kicker="Cells stay empty until we have members">
+        Skool deliberately hides your member list — even from owners (master
+        plan Part 4). To populate completion percentages, upload a member
+        export from Skool in{" "}
+        <Link href="/settings" className="text-ink underline-offset-4 hover:underline">
+          Settings → Members
+        </Link>
+        . If your CSV includes member IDs, the next sync run will pull
+        everyone&apos;s progression automatically.
+      </BannerCard>
+    );
+  }
+
+  // 2. Have members, but none with Skool IDs (CSV-only, no IDs) →
+  //    explain the gap, point at harvest results from the next sync.
+  if (membersWithProgressionId === 0) {
+    return (
+      <BannerCard tone="warn" kicker="Members are imported, but no Skool IDs yet">
+        We have {memberCount} {plural("member", memberCount)} from your CSV but
+        no Skool member IDs to call the per-member progression endpoint with.
+        Re-export with a <span className="font-mono">Member ID</span> column,
+        or wait — the next background sync also tries to harvest IDs from
+        your analytics endpoints.
+      </BannerCard>
+    );
+  }
+
+  // 3. Have members + IDs but progression hasn't been computed yet →
+  //    nudge to refresh.
+  if (!hasAnyProgression) {
+    return (
+      <BannerCard tone="warn" kicker="Ready to compute completion %">
+        {membersWithProgressionId} of {memberCount}{" "}
+        {plural("member", memberCount)} have Skool IDs we can sync progression
+        for. Click <strong>Refresh now</strong> to pull their completion data.
+        {lastRun?.status === "partial" ? (
+          <>
+            {" "}
+            (Last sync had warnings — check the run record if it keeps happening.)
+          </>
+        ) : null}
+      </BannerCard>
+    );
+  }
+
+  // 4. Real data — pick the worst lesson across all courses and call it
+  //    the main leak. AI-generated insight prose lands Day 6 (master plan).
+  const ranked = [...lessonRows]
+    .filter((l): l is LessonRow & { completionPct: string } => l.completionPct !== null)
+    .map((l) => ({ ...l, pct: Number(l.completionPct) }))
+    .sort((a, b) => a.pct - b.pct);
+  const worst = ranked[0];
+
   return (
-    <section className="mt-8 rounded-card border-l-4 border-terracotta border-y border-r border-rule bg-cream p-6">
-      <div className="flex items-start gap-3">
-        <span aria-hidden className="text-xl text-terracotta-ink">!</span>
-        <div>
-          <div className="text-xs uppercase tracking-[0.18em] text-terracotta-ink">
-            Coming Day 5
-          </div>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink">
-            Your course structure is mapped — lesson cells light up with real
-            completion percentages once we wire member progression sync. The
-            AI insight panel here will explain where momentum dies, grounded
-            in your actual data (not generic SaaS speak).
-          </p>
-        </div>
+    <BannerCard tone="ok" kicker="Where momentum dies">
+      {worst ? (
+        <>
+          The biggest leak right now is{" "}
+          <strong>L{worst.position}: {worst.title}</strong> at{" "}
+          <strong>{Math.round(worst.pct)}%</strong> completion across{" "}
+          {memberCount} {plural("member", memberCount)}. AI-generated insight
+          prose (why it&apos;s leaking, what to try) ships Day 6 — for now,
+          this is the lesson worth opening in Skool.
+        </>
+      ) : (
+        <>Progression is synced. Cells below show real per-lesson completion %.</>
+      )}
+    </BannerCard>
+  );
+}
+
+type BannerTone = "ok" | "warn";
+
+function BannerCard({
+  tone,
+  kicker,
+  children,
+}: {
+  tone: BannerTone;
+  kicker: string;
+  children: React.ReactNode;
+}) {
+  const stripe = tone === "warn" ? "border-l-terracotta" : "border-l-forest";
+  const kickerColor =
+    tone === "warn" ? "text-terracotta-ink" : "text-forest";
+  return (
+    <section
+      className={`mt-8 rounded-card border-l-4 ${stripe} border-y border-r border-rule bg-cream p-6`}
+    >
+      <div
+        className={`text-xs uppercase tracking-[0.18em] ${kickerColor}`}
+      >
+        {kicker}
       </div>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink">
+        {children}
+      </p>
     </section>
   );
 }
@@ -232,15 +365,7 @@ function CoursesSection({
     enrolledCount: number | null;
     completedCount: number | null;
   }>;
-  lessonsByCourse: Map<
-    string,
-    Array<{
-      id: string;
-      title: string;
-      position: number;
-      completionPct: string | null;
-    }>
-  >;
+  lessonsByCourse: Map<string, LessonRow[]>;
 }) {
   return (
     <section className="mt-10">
@@ -248,10 +373,13 @@ function CoursesSection({
         <h2 className="font-display text-2xl">All courses</h2>
         <div className="text-xs text-muted">
           <span className="mr-2 inline-block h-2 w-2 rounded-full bg-forest align-middle" />
-          Green = healthy
+          Healthy ≥75%
+          <span className="mx-3 text-rule">·</span>
+          <span className="mr-2 inline-block h-2 w-2 rounded-full bg-terracotta-soft align-middle" />
+          Slipping 50–74%
           <span className="mx-3 text-rule">·</span>
           <span className="mr-2 inline-block h-2 w-2 rounded-full bg-terracotta align-middle" />
-          Orange = losing people
+          Leaking &lt;50%
         </div>
       </div>
 
@@ -280,13 +408,16 @@ function CourseCard({
     enrolledCount: number | null;
     completedCount: number | null;
   };
-  lessons: Array<{
-    id: string;
-    title: string;
-    position: number;
-    completionPct: string | null;
-  }>;
+  lessons: LessonRow[];
 }) {
+  // "Main leak" = lowest-completion lesson in this course. Falls back
+  // to "pending" until any lesson has progression data.
+  const ranked = lessonRows
+    .filter((l): l is LessonRow & { completionPct: string } => l.completionPct !== null)
+    .map((l) => ({ ...l, pct: Number(l.completionPct) }))
+    .sort((a, b) => a.pct - b.pct);
+  const worst = ranked[0];
+
   return (
     <article className="rounded-card border border-rule bg-canvas p-5">
       <header className="flex items-start justify-between">
@@ -298,8 +429,7 @@ function CourseCard({
           </p>
         </div>
         <span className="text-xs text-muted">
-          {/* Click-to-zoom lands Day 6 (master plan). For now the link
-              is non-actionable so we don't promise UI we don't have. */}
+          {/* Click-to-zoom lands Day 6 (master plan). */}
           Zoom view coming Day 6
         </span>
       </header>
@@ -323,12 +453,15 @@ function CourseCard({
 
       <footer className="mt-4 flex items-center justify-between text-xs text-muted">
         <span>
-          {/* Real numbers go here Day 5+ once progression is wired. */}
           {course.enrolledCount !== null
             ? `${course.enrolledCount} enrolled · ${course.completedCount ?? 0} completed`
             : "Enrollment data pending"}
         </span>
-        <span className="text-muted/70">Main leak: pending</span>
+        <span className="text-muted/70">
+          {worst
+            ? `Main leak: L${worst.position} (${Math.round(worst.pct)}%)`
+            : "Main leak: pending"}
+        </span>
       </footer>
     </article>
   );
@@ -343,20 +476,10 @@ function LessonCell({
   title: string;
   completionPct: string | null;
 }) {
-  // Without progression data we render a neutral cell rather than a
-  // green/orange one — colour signals nothing if the value is unknown.
-  // Day 5 fills completionPct and we switch to the V2 colour scale.
   const pct = completionPct ? Number(completionPct) : null;
-  const tone =
-    pct === null
-      ? "neutral"
-      : pct >= 75
-        ? "healthy"
-        : pct >= 50
-          ? "warm"
-          : "leak";
+  const tone = toneForCompletion(pct);
   const cls = {
-    neutral: "border-rule bg-canvas text-muted",
+    unknown: "border-rule bg-canvas text-muted",
     healthy: "border-forest/40 bg-forest-soft text-ink",
     warm: "border-terracotta-soft bg-terracotta-soft/40 text-ink",
     leak: "border-terracotta/40 bg-terracotta-soft/70 text-terracotta-ink",
@@ -397,7 +520,9 @@ function plural(word: string, n: number): string {
 }
 
 function lastRunLabel(
-  run: { status: string; startedAt: Date; finishedAt: Date | null } | undefined,
+  run:
+    | { status: string; startedAt: Date; finishedAt: Date | null }
+    | undefined,
 ): string {
   if (!run) return "Never synced";
   const ts = run.finishedAt ?? run.startedAt;
