@@ -17,6 +17,7 @@ import {
   recomputeLessonCompletion,
   syncProgressionForKnownMembers,
 } from "./members";
+import { syncCommunityMetrics } from "./metrics";
 
 // One-stop sync for a single community. Reused by:
 //   - the Vercel cron at /api/cron/sync (every 6h)
@@ -200,6 +201,26 @@ export async function syncCommunity(opts: SyncOptions): Promise<SyncRunSummary> 
     } catch (err) {
       warnings.push({
         step: "aggregate_completion",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // --- Step E: community-level activity time-series (Pulse) -------------
+    // Best-effort. The Pulse view degrades gracefully if this is
+    // missing — empty tiles show "Pending first sync" copy.
+    try {
+      const metrics = await syncCommunityMetrics(client, {
+        communityId: opts.communityId,
+        skoolGroupId: opts.skoolGroupId,
+      });
+      counters.apiCalls += metrics.apiCalls;
+      for (const w of metrics.warnings) {
+        warnings.push({ step: w.step, message: w.message });
+      }
+    } catch (err) {
+      if (err instanceof SkoolError) throw err;
+      warnings.push({
+        step: "sync_metrics",
         message: err instanceof Error ? err.message : String(err),
       });
     }

@@ -629,6 +629,115 @@ redesign or kill.
 
 ## Update log
 
+- **2026-04-29:** Day 14 — Polish + ship prep. UI pass against V2 tokens
+  (same Tailwind palette as `tailwind.config.ts`; no mockup PNGs in-repo).
+  Added route-level loading skeletons: `src/app/(app)/loading.tsx` for
+  authenticated navigations (sidebar stays mounted; main pane pulses),
+  `src/app/sign-in/loading.tsx` for magic-link screens. Standardized pages
+  that previously returned blank on missing creator (`return null`) to
+  `redirect("/sign-in")`. Drop-off disconnected state aligned with other
+  feature pages via shared `ConnectFirstCard`. Beta cohort: optional env gate
+  `BETA_INVITE_EMAILS` (comma-separated emails; omit = open signup), wired
+  in `requestMagicLink` server action (`src/app/sign-in/actions.ts`);
+  public `/beta` waitlist page with configurable `BETA_CONTACT_EMAIL`.
+  `DraftMessageButton` disables copy while the server persists the draft.
+  Production runbook `docs/runbooks/vercel-production.md` covers custom
+  domain `coursesuccess.io`, Resend DKIM, cron verification, Neon URLs, and
+  beta env. Landing copy updated (`/`) — founding cohort, no stray “day 1”
+  badge; root metadata title shortened to **CourseSuccess**. Deploy and
+  first production sync/cron verification are **manual checks in Vercel**
+  after you connect the repo — the agent cannot run `vercel` against your
+  account from this environment. Suite: **233 / 233** green — typecheck,
+  lint, test, prod build verified locally.
+- **2026-04-28 (afternoon):** Days 11–13 shipped — Flashcards (`/flashcards`)
+  and Weekly Optimization Report (`/weekly-report`). Flashcards: full
+  source-attribution decision tree description / PDF / cached
+  transcript / Whisper / skipped, with the per-lesson source pill
+  visible verbatim on the page so the creator always sees where cards
+  came from. Generation is Anthropic Claude Sonnet 4.5 with a
+  deterministic fallback (`src/lib/flashcards/generate.ts`), capped at
+  3-5 cards every time. Send orchestrator
+  (`src/lib/flashcards/orchestrator.ts`) walks the 24-48h send window
+  hourly via `/api/cron/flashcards`, dispatching member emails through
+  Resend with a `flashcard:{memberId}:{lessonId}` idempotency key.
+  Per master plan defaults: flashcard generation ON by default,
+  transcription OFF until the creator opts in (toggle still lives in
+  Settings). PDF parsing and Whisper transcription have their gates,
+  UI, and resolver branches wired but the heavy extraction work is
+  deferred — `pdf-parse`, `openai`, and ffmpeg need an explicit
+  dependency call. See
+  `docs/decisions/0011-flashcards-thin-bundle-and-deferred-extraction.md`.
+  Weekly Report: Monday 7am-creator-local cron
+  (`/api/cron/weekly-reports`, hourly UTC) evaluates each creator's
+  IANA timezone via a pure scheduler
+  (`src/lib/weekly-report/schedule.ts`). Five sections built from pure
+  composers (`sections.ts`): celebrate / DM / lesson-to-fix /
+  pattern / question, with the wisdom-doc 3-action cap enforced even
+  though five sections render. Welcome variant fires for creators in
+  their first 7 days. Retention thresholds (`thresholds.ts`) flag
+  ≥80% as average, ≥90% as good, &lt;70% as a content-review trigger;
+  the email surfaces a question instead of a graph when below 80%.
+  Day-90 milestone celebrations look at members who crossed day 90
+  inside the last 7 days. Three idempotency layers: a unique idx on
+  `weekly_reports(creator_id, week_start_date)`, a `sentAt`
+  early-bail, and a Resend Idempotency-Key. The viewer at
+  `/weekly-report` shows the latest report (HTML), an 8-week history
+  list, and a "Regenerate this week" button that refreshes the
+  markdown body without re-emailing. Two new cron entries in
+  `vercel.json`. Tests added across thresholds, schedule, sections,
+  email, render — full suite at 230 / 230. See
+  `docs/decisions/0012-weekly-report-monday-7am-local.md`. Next:
+  Days 14–17 (paid funnel + onboarding polish).
+- **2026-04-28:** Days 8–10 shipped — Member Check-ins (`/check-ins`),
+  Community Pulse (`/pulse`), and a combined Today view (`/today`)
+  matching the V2 mockup. New `community_metrics_daily` table
+  (migration `0003_mushy_firestar.sql`) persists Skool's
+  `/admin-metrics` 30-day window during sync step E, so /pulse renders
+  from DB and survives upstream hiccups. At-risk classification is a
+  deterministic three-rule classifier
+  (`src/lib/checkins/at-risk.ts` — stalled mid-course / tenure
+  dropoff / brand-new ghost), ranked by relationship value (tenure +
+  prior progress, LTV as tiebreak), capped at 7. DM templates for
+  Sam / Hamza / Professional tones are pure substitution functions
+  (`src/lib/checkins/templates.ts`) — no LLM call, no copy drift.
+  "Draft Message" copies to clipboard and opens the Skool inbox; the
+  honest disclosure ("Skool doesn't allow direct sends — one paste
+  sends") is the wisdom-doc verbatim. Pulse renders members /
+  regulars / activity tiles with ±5% flat-band trend pills, a
+  day-of-week heat strip, a "Who to DM today" widget pulling from the
+  same loader /check-ins uses, and Posts / Likes "coming soon" tiles
+  per Feature 3 v1 scope. Today view now combines top check-in +
+  worst lesson + pulse summary, falling back to the setup checklist
+  when there's no data yet. New tests across at-risk, ranking, tone
+  templates, pulse aggregation, and admin-metrics bucketing — full
+  suite at 146 / 146. See `docs/decisions/0010-at-risk-algorithm.md`.
+  Next: Days 11–13 (Flashcards + Weekly Report).
+- **2026-04-27:** Day 7 polish on the Drop-Off Map (closes the
+  Days 4–7 block). "Main leak" per course is now cliff-aware — the
+  lesson-to-lesson transition with the largest drop, prefering ones
+  that cross into the &lt;50% leak zone, displayed as `L2 → L3
+  (66% → 33%)` to match the V2 mockup. New deterministic "Try this
+  week" block on the lesson zoom page with at most 3 wisdom-doc-grounded
+  actions (cliff → rewatch previous; high drop → split or trim;
+  module 1–2 → tighten early curriculum; healthy lesson → quick-win
+  prompt; tiny sample → hold the data; always → ask 2–3 stuck members).
+  AI insight banner now streams through `<Suspense>` so the course
+  grid paints instantly while Anthropic generates. Header copy
+  trimmed to match mockup (`courses · lessons` + click hint). Tests
+  added: 10 cliff-detection cases, 10 suggestion-ranking cases —
+  full suite at 86 / 86. Next: Days 8–10 (Pulse + Member Check-ins).
+- **2026-04-26:** Day 6 shipped. Drop-Off Map now renders the AI-grounded
+  "What we're seeing" banner (Anthropic Claude Sonnet 4.5, pinned build,
+  voice rules from Part 6 enforced via system prompt). Click-to-zoom
+  lives at `/drop-off/lessons/[id]` with insight prose, prev/this/next
+  completion strip, member-level "who's where" table, and an honest
+  "what we don't know" footer. Insights cache in the existing
+  `lesson_insights` table with a 24h TTL and a manual regenerate
+  button (60s throttle). Honest fallback (`fallback-rule-v1`) keeps
+  prose flowing when `ANTHROPIC_API_KEY` is unset; UI labels which
+  mode is in use. Side-fix: Settings is now a persistent sidebar
+  entry (was only reachable when not connected). See
+  `docs/decisions/0009-ai-insights-anthropic-with-fallback.md`.
 - **2026-04-25:** Day 1 build kickoff. Locked database = Neon, auth =
   magic link via Resend, encryption = AES-256-GCM in Vercel env, CSV
   import surfaced in Settings (and used for member email capture),

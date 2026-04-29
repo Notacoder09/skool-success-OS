@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { auth, signIn } from "@/auth";
+import { auth } from "@/auth";
 import { Logo } from "@/components/Logo";
+
+import { requestMagicLink } from "./actions";
 
 export default async function SignInPage({
   searchParams,
@@ -12,18 +15,8 @@ export default async function SignInPage({
   if (session?.user) redirect("/today");
 
   const fromParam = typeof searchParams.from === "string" ? searchParams.from : "/today";
-
-  async function startSignIn(formData: FormData) {
-    "use server";
-    const email = String(formData.get("email") ?? "")
-      .trim()
-      .toLowerCase();
-    if (!email) return;
-    await signIn("resend", {
-      email,
-      redirectTo: fromParam,
-    });
-  }
+  const errorParam =
+    typeof searchParams.error === "string" ? searchParams.error : undefined;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
@@ -38,7 +31,25 @@ export default async function SignInPage({
         We&apos;ll email you a one-time link. No password to remember.
       </p>
 
-      <form action={startSignIn} className="mt-8 flex flex-col gap-3">
+      {errorParam === "invite_only" ? (
+        <div
+          className="mt-6 rounded-lg border border-rule bg-cream px-4 py-3 text-sm leading-relaxed text-ink"
+          role="status"
+        >
+          This email isn&apos;t on the beta list yet — we&apos;re keeping the first
+          cohort small. Request access first, then come back once you&apos;re on
+          the list.
+          <Link
+            href="/beta"
+            className="mt-3 block font-medium text-terracotta-ink underline underline-offset-4 hover:text-ink"
+          >
+            How to request beta access →
+          </Link>
+        </div>
+      ) : null}
+
+      <form action={requestMagicLink} className="mt-8 flex flex-col gap-3">
+        <input type="hidden" name="from" value={fromParam} />
         <label className="text-sm text-muted" htmlFor="email">
           Email
         </label>
@@ -60,8 +71,11 @@ export default async function SignInPage({
       </form>
 
       <p className="mt-8 text-xs text-muted">
-        Beta access is invite-only right now. If you don&apos;t have an account
-        yet, the email won&apos;t arrive.
+        Beta access uses a small invite list until we&apos;re ready to open up
+        publicly.{" "}
+        <Link href="/beta" className="text-terracotta-ink underline underline-offset-4 hover:text-ink">
+          Request access
+        </Link>
       </p>
     </main>
   );

@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
 import { communities, members } from "@/db/schema/communities";
 import { creators, skoolCredentials } from "@/db/schema/creators";
-import { parseMembersCsv } from "@/lib/csv/members";
+import { parseMembersCsv, type ParsedMemberRow } from "@/lib/csv/members";
 import { encrypt, serializeSkoolCookies, type SkoolCookies } from "@/lib/crypto";
 import { getPrimaryCommunity, requireSession } from "@/lib/server/creator";
 import {
@@ -194,6 +194,8 @@ const MAX_CSV_BYTES = 5 * 1024 * 1024;
 export type ImportMembersResult =
   | {
       ok: true;
+      /** Total members imported (inserted + updated) — the headline number. */
+      importedCount: number;
       inserted: number;
       updated: number;
       enrichedWithSkoolId: number;
@@ -202,6 +204,62 @@ export type ImportMembersResult =
       skoolIdRowsForLaterSync: number;
     }
   | { ok: false; error: string };
+
+// Finds an existing member row for an incoming CSV row, walking the
+// identity keys in descending order of confidence. Mirrors the
+// dedupe logic in the parser (`seenIdentityKeys`) so DB state and
+// CSV state agree on what constitutes "the same person".
+async function findExistingMember(
+  communityId: string,
+  row: ParsedMemberRow,
+): Promise<{ id: string; skoolMemberId: string | null } | null> {
+  if (row.skoolMemberId) {
+    const [byId] = await db
+      .select({ id: members.id, skoolMemberId: members.skoolMemberId })
+      .from(members)
+      .where(
+        and(
+          eq(members.communityId, communityId),
+          eq(members.skoolMemberId, row.skoolMemberId),
+        ),
+      );
+    if (byId) return byId;
+  }
+  if (row.email) {
+    const [byEmail] = await db
+      .select({ id: members.id, skoolMemberId: members.skoolMemberId })
+      .from(members)
+      .where(
+        and(
+          eq(members.communityId, communityId),
+          eq(members.email, row.email),
+        ),
+      );
+    if (byEmail) return byEmail;
+  }
+  // No reliable key — try (community, name, joined_at) only when the
+  // existing row also has no email. Two emailless rows with the same
+  // name and the same join timestamp are almost certainly the same
+  // member; if they aren't, the creator can re-export with emails.
+  if (row.name) {
+    const conditions = [
+      eq(members.communityId, communityId),
+      isNull(members.email),
+      eq(members.name, row.name),
+    ];
+    if (row.joinedAt) {
+      conditions.push(eq(members.joinedAt, row.joinedAt));
+    } else {
+      conditions.push(isNull(members.joinedAt));
+    }
+    const [byName] = await db
+      .select({ id: members.id, skoolMemberId: members.skoolMemberId })
+      .from(members)
+      .where(and(...conditions));
+    if (byName) return byName;
+  }
+  return null;
+}
 
 export async function importMembersFromCsv(
   formData: FormData,
@@ -244,43 +302,44 @@ export async function importMembersFromCsv(
     return { ok: false, error: parsed.message };
   }
 
-  // Upsert each row. The `members` table has two possible unique keys
-  // for a community: (skool_member_id) and (email). We dedupe by email
-  // — that's what Skool exports always include and the CSV is the
-  // canonical source of email truth. If a row also carries a Skool
-  // member ID, we enrich the existing row so per-member progression
-  // sync can pick it up next run.
+  // Upsert each row. The members table has three possible identity
+  // keys: (skool_member_id), (email), and — for emailless free
+  // members from Skool's CSV export — (community, name, joined_at).
+  // We try them in that order of confidence.
+  //
+  // source: "csv" is set on every row so the next sync run knows to
+  // match these against any Skool API data we discover (ADR-0004).
   const now = new Date();
   let inserted = 0;
   let updated = 0;
   let enrichedWithSkoolId = 0;
-  let skoolIdRowsForLaterSync = 0;
 
   for (const row of parsed.rows) {
-    const existing = await db
-      .select({
-        id: members.id,
-        skoolMemberId: members.skoolMemberId,
-      })
-      .from(members)
-      .where(
-        and(eq(members.communityId, community.id), eq(members.email, row.email)),
-      );
+    const existing = await findExistingMember(community.id, row);
 
-    if (existing[0]) {
-      const wasMissingSkoolId = !existing[0].skoolMemberId;
+    const ltvValue =
+      row.ltv !== null && Number.isFinite(row.ltv) ? String(row.ltv) : null;
+
+    if (existing) {
+      const wasMissingSkoolId = !existing.skoolMemberId;
       const willHaveSkoolId =
         wasMissingSkoolId && row.skoolMemberId !== null;
       await db
         .update(members)
         .set({
-          name: row.name ?? sql`name`, // keep existing name when CSV has none
-          skoolMemberId: row.skoolMemberId ?? existing[0].skoolMemberId,
+          // Keep DB-side values for fields the CSV row doesn't fill,
+          // so re-importing a thinner CSV doesn't blow away earlier
+          // richer data.
+          name: row.name ?? sql`name`,
+          email: row.email ?? sql`email`,
+          skoolMemberId: row.skoolMemberId ?? existing.skoolMemberId,
           joinedAt: row.joinedAt ?? sql`joined_at`,
+          tier: row.tier ?? sql`tier`,
+          ltv: ltvValue ?? sql`ltv`,
           source: "csv",
           updatedAt: now,
         })
-        .where(eq(members.id, existing[0].id));
+        .where(eq(members.id, existing.id));
       updated += 1;
       if (willHaveSkoolId) enrichedWithSkoolId += 1;
     } else {
@@ -290,13 +349,14 @@ export async function importMembersFromCsv(
         name: row.name,
         skoolMemberId: row.skoolMemberId,
         joinedAt: row.joinedAt,
+        tier: row.tier,
+        ltv: ltvValue,
         source: "csv",
         createdAt: now,
         updatedAt: now,
       });
       inserted += 1;
     }
-    if (row.skoolMemberId) skoolIdRowsForLaterSync += 1;
   }
 
   // Tell the Drop-Off Map page to refetch — it'll see the new member
@@ -320,6 +380,7 @@ export async function importMembersFromCsv(
 
   return {
     ok: true,
+    importedCount: inserted + updated,
     inserted,
     updated,
     enrichedWithSkoolId,

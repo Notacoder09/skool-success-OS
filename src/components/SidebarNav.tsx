@@ -42,6 +42,14 @@ const NAV: NavGroup[] = [
       { label: "Weekly Report", href: "/weekly-report" },
     ],
   },
+  // The mockup keeps the chrome minimal (no Settings in the sidebar at
+  // all), but in the real product the creator needs a way back to
+  // Settings to swap communities or re-upload a CSV. Keep it in its own
+  // group at the bottom so it doesn't compete with the V1 features.
+  {
+    heading: "Account",
+    items: [{ label: "Settings", href: "/settings" }],
+  },
 ];
 
 export function SidebarNav({
@@ -100,9 +108,20 @@ export function SidebarNav({
         ))}
       </nav>
 
-      <div className="mx-4 mb-4 rounded-card border border-rule bg-canvas px-4 py-3">
-        <div className="text-[11px] uppercase tracking-[0.16em] text-muted">
-          Connected community
+      <Link
+        href="/settings"
+        className="mx-4 mb-4 block rounded-card border border-rule bg-canvas px-4 py-3 transition hover:border-terracotta/40 hover:bg-cream/40"
+        aria-label={
+          connectedCommunity
+            ? "Open Settings to manage community or re-upload member CSV"
+            : "Connect Skool in Settings"
+        }
+      >
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-muted">
+            Connected community
+          </div>
+          <span className="text-[11px] text-muted/70">Manage →</span>
         </div>
         <div className="mt-1.5 text-sm font-medium text-ink">
           {connectedCommunity ? connectedCommunity.name : "Not connected"}
@@ -119,12 +138,10 @@ export function SidebarNav({
               {connectedCommunity.lastSyncedLabel}
             </>
           ) : (
-            <Link href="/settings" className="text-terracotta-ink underline-offset-4 hover:underline">
-              Connect Skool in Settings
-            </Link>
+            <span className="text-terracotta-ink">Connect Skool →</span>
           )}
         </div>
-      </div>
+      </Link>
     </aside>
   );
 }

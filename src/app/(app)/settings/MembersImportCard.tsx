@@ -100,11 +100,16 @@ export function MembersImportCard({
         </label>
 
         <p className="max-w-2xl text-xs leading-relaxed text-muted">
-          Export from Skool: Admin → Members → Export. Required column:{" "}
-          <span className="font-mono">Email</span>. Optional but useful:{" "}
-          <span className="font-mono">Name</span>,{" "}
-          <span className="font-mono">Member ID</span> (32-char hex — enables
-          per-member progression sync). Anything else is ignored.
+          Export from Skool: Admin → Members → Export. We read{" "}
+          <span className="font-mono">FirstName</span>,{" "}
+          <span className="font-mono">LastName</span>,{" "}
+          <span className="font-mono">Email</span>,{" "}
+          <span className="font-mono">JoinedDate</span>,{" "}
+          <span className="font-mono">Tier</span>, and{" "}
+          <span className="font-mono">LTV</span>. Email is optional —
+          members without one still get imported and matched against your
+          Skool data on the next sync. Question/Answer/Price columns are
+          ignored.
         </p>
 
         <ResultPanel status={status} />
@@ -123,23 +128,31 @@ function ResultPanel({ status }: { status: Status }) {
     );
   }
   const r = status.result;
+  // Headline copy as requested by the creator on 2026-04-27. The
+  // detail line is a small expansion of the same fact for cases
+  // where the totals don't match (rejected rows, enrichment, etc.).
   return (
     <div className="rounded-md border border-forest/40 bg-forest-soft px-3 py-2 text-xs text-ink">
       <div>
-        <strong>{r.inserted}</strong> added
-        {r.updated > 0 ? `, ${r.updated} updated` : ""}
-        {r.enrichedWithSkoolId > 0
-          ? `, ${r.enrichedWithSkoolId} enriched with Skool ID`
-          : ""}
-        .
+        Imported <strong>{r.importedCount}</strong>{" "}
+        {r.importedCount === 1 ? "member" : "members"}. We&apos;ll match
+        them to your Skool data on the next sync.
       </div>
-      <div className="mt-0.5 text-muted">
-        {r.skoolIdRowsForLaterSync} {r.skoolIdRowsForLaterSync === 1 ? "member is" : "members are"}{" "}
-        ready for progression sync.
-        {r.rejectedRows > 0
-          ? ` ${r.rejectedRows} ${r.rejectedRows === 1 ? "row" : "rows"} skipped (bad/missing email).`
-          : ""}
-      </div>
+      {r.updated > 0 ||
+      r.enrichedWithSkoolId > 0 ||
+      r.rejectedRows > 0 ? (
+        <div className="mt-0.5 text-muted">
+          {r.inserted} new
+          {r.updated > 0 ? ` · ${r.updated} updated` : ""}
+          {r.enrichedWithSkoolId > 0
+            ? ` · ${r.enrichedWithSkoolId} enriched with Skool ID`
+            : ""}
+          {r.rejectedRows > 0
+            ? ` · ${r.rejectedRows} ${r.rejectedRows === 1 ? "row" : "rows"} skipped`
+            : ""}
+          .
+        </div>
+      ) : null}
     </div>
   );
 }

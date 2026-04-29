@@ -8,6 +8,7 @@ const PUBLIC_PATHS = [
   "/", // marketing landing
   "/sign-in",
   "/sign-in/check-email",
+  "/beta",
 ];
 
 const PUBLIC_PREFIXES = [

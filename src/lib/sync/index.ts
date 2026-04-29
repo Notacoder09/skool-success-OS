@@ -29,6 +29,8 @@ export type {
   CompletionCounts,
   CompletionTone,
 } from "./aggregation";
+export { findLargestCliff, formatCliff } from "./cliffs";
+export type { Cliff, CliffLesson } from "./cliffs";
 export {
   discoverMembersFromAnalytics,
   recomputeLessonCompletion,

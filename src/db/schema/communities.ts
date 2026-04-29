@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
   numeric,
@@ -123,6 +124,13 @@ export const members = pgTable(
     // ADR-0004: where we learned about this member.
     source: memberSourceEnum("source").notNull(),
 
+    // Membership / monetization fields (Day 7 — populated from
+    // Skool's CSV export which carries Tier + LTV columns). Pulse +
+    // Weekly Report features can read these later for revenue
+    // segmentation; until then, they're just preserved import data.
+    tier: text("tier"),
+    ltv: numeric("ltv", { precision: 10, scale: 2 }),
+
     joinedAt: timestamp("joined_at", { mode: "date" }),
     lastActiveAt: timestamp("last_active_at", { mode: "date" }),
 
@@ -139,6 +147,36 @@ export const members = pgTable(
     communityEmailIdx: uniqueIndex("members_community_email_idx")
       .on(t.communityId, t.email)
       .where(sql`${t.email} IS NOT NULL`),
+  }),
+);
+
+// Day 8 — community-level activity time-series for the Pulse view.
+// One row per (community, date). Populated by the sync orchestrator
+// from Skool's /admin-metrics?range=30d&amt=monthly endpoint, which
+// returns total_members[30], active_members[30], daily_activities[30].
+// We persist (vs. live-fetch) so /pulse renders fast from DB and we
+// keep history if Skool drops or rewrites data points.
+export const communityMetricsDaily = pgTable(
+  "community_metrics_daily",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    communityId: text("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    metricDate: date("metric_date", { mode: "date" }).notNull(),
+    totalMembers: integer("total_members"),
+    activeMembers: integer("active_members"),
+    dailyActivities: integer("daily_activities"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    communityDateIdx: uniqueIndex("community_metrics_daily_idx").on(
+      t.communityId,
+      t.metricDate,
+    ),
   }),
 );
 

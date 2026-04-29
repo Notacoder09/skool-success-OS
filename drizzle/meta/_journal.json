@@ -15,6 +15,20 @@
       "when": 1777162341925,
       "tag": "0001_spotty_firebrand",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777316113485,
+      "tag": "0002_even_romulus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777387500124,
+      "tag": "0003_mushy_firestar",
+      "breakpoints": true
     }
   ]
 }

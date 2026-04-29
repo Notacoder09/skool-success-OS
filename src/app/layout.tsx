@@ -11,7 +11,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "CourseSuccess OS",
+  title: "CourseSuccess",
   description:
     "Help your community actually finish what they started. Better retention, less churn, members who stick around.",
 };

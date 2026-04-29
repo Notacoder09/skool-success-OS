@@ -1,25 +1,40 @@
 import Link from "next/link";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 
 import { db } from "@/db";
-import { courses, lessons, members } from "@/db/schema/communities";
+import {
+  communityMetricsDaily,
+  courses,
+  lessons,
+  members,
+} from "@/db/schema/communities";
+import { firstNameFrom } from "@/lib/checkins";
+import { loadTopCheckIn, type CheckInRow } from "@/lib/checkins/load";
+import { latestValue, trendOverWindow, type DailyPoint } from "@/lib/pulse/aggregate";
 import {
   getCurrentCreator,
   getPrimaryCommunity,
   getSkoolConnection,
 } from "@/lib/server/creator";
 
-// V2 "Today" view (mockup screen 1). Day 5 ships the honest framing
-// while Pulse + Check-ins build out (master plan Days 8-10).
+// V2 "Today" view (mockup screen 01-today.png).
 //
-// Operating Principle #5 — never fake numbers. Until at-risk scoring
-// lands, the only metrics we surface are ones we can actually compute
-// from real synced data: member count, mapped courses/lessons, sync
-// freshness.
+// Days 8-10 update: combine the day's signals — top check-in, worst
+// drop-off lesson, sync freshness — instead of the setup-checklist-
+// only placeholder. Setup checklist still appears when the creator
+// hasn't synced yet (graceful fallback).
+//
+// Voice rules from master plan Part 6:
+//   - Greeting: "Good [morning/afternoon], Xavier. Here's what's
+//     happening today." (NOT "Welcome back. 247 active members.")
+//   - Never panicked, never growth-marketing language
+
+export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
   const creator = await getCurrentCreator();
-  if (!creator) return null;
+  if (!creator) redirect("/sign-in");
 
   const connection = await getSkoolConnection(creator.creatorId);
   const community = await getPrimaryCommunity(creator.creatorId);
@@ -32,6 +47,10 @@ export default async function TodayPage() {
     courses: 0,
     lessons: 0,
   };
+  let topCheckIn: CheckInRow | null = null;
+  let worstLesson: WorstLesson | null = null;
+  let pulse: PulseSummary | null = null;
+
   if (community) {
     const [memberRows, withId, courseRows, lessonRows] = await Promise.all([
       db
@@ -63,9 +82,19 @@ export default async function TodayPage() {
       courses: courseRows.length,
       lessons: lessonRows.length,
     };
+
+    [topCheckIn, worstLesson, pulse] = await Promise.all([
+      loadTopCheckIn({
+        communityId: community.id,
+        creatorId: creator.creatorId,
+      }),
+      loadWorstLesson(community.id),
+      loadPulseSummary(community.id),
+    ]);
   }
 
   const synced = community?.lastSyncedAt ?? null;
+  const hasAnyData = totals.members > 0 || totals.lessons > 0;
 
   return (
     <div className="max-w-4xl">
@@ -100,14 +129,171 @@ export default async function TodayPage() {
 
       {!connection.connected ? (
         <ConnectFirstCard />
+      ) : !hasAnyData ? (
+        <SetupContent totals={totals} synced={synced !== null} />
       ) : (
-        <TodayContent totals={totals} synced={synced !== null} />
+        <>
+          <DailySignals
+            topCheckIn={topCheckIn}
+            worstLesson={worstLesson}
+            pulse={pulse}
+          />
+          {(!totals.membersWithProgressionId || !pulse) && (
+            <SetupContent totals={totals} synced={synced !== null} />
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function TodayContent({
+function DailySignals({
+  topCheckIn,
+  worstLesson,
+  pulse,
+}: {
+  topCheckIn: CheckInRow | null;
+  worstLesson: WorstLesson | null;
+  pulse: PulseSummary | null;
+}) {
+  return (
+    <>
+      <section className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <CheckInTile checkIn={topCheckIn} />
+        <DropOffTile lesson={worstLesson} />
+      </section>
+      <section className="mt-4">
+        <PulseTile pulse={pulse} />
+      </section>
+    </>
+  );
+}
+
+function CheckInTile({ checkIn }: { checkIn: CheckInRow | null }) {
+  if (!checkIn) {
+    return (
+      <Link
+        href="/check-ins"
+        className="rounded-card border border-rule bg-canvas p-6 transition hover:border-terracotta/40"
+      >
+        <div className="text-xs uppercase tracking-[0.18em] text-muted">
+          One person to DM
+        </div>
+        <p className="mt-3 text-base leading-relaxed text-ink">
+          Nobody flagged today. Either everyone&apos;s active or the next sync
+          will surface someone — open Member Check-ins to see when the
+          list refreshes.
+        </p>
+      </Link>
+    );
+  }
+  const display = checkIn.name?.trim() || checkIn.email || "A member";
+  const first = firstNameFrom(checkIn.name) ?? display;
+  return (
+    <Link
+      href="/check-ins"
+      className="rounded-card border border-rule bg-cream p-6 transition hover:border-terracotta/40"
+    >
+      <div className="text-xs uppercase tracking-[0.18em] text-terracotta-ink">
+        One person to DM
+      </div>
+      <div className="mt-2 font-display text-3xl">{first}</div>
+      <p className="mt-2 text-sm leading-relaxed text-ink">
+        {checkIn.flag.reason}.
+      </p>
+      <div className="mt-3 text-xs text-muted">
+        Open Member Check-ins to draft →
+      </div>
+    </Link>
+  );
+}
+
+function DropOffTile({ lesson }: { lesson: WorstLesson | null }) {
+  if (!lesson) {
+    return (
+      <Link
+        href="/drop-off"
+        className="rounded-card border border-rule bg-canvas p-6 transition hover:border-terracotta/40"
+      >
+        <div className="text-xs uppercase tracking-[0.18em] text-muted">
+          One lesson to fix
+        </div>
+        <p className="mt-3 text-base leading-relaxed text-ink">
+          We don&apos;t have completion data for any lesson yet. The first
+          progression sync needs members with Skool IDs — see Settings.
+        </p>
+      </Link>
+    );
+  }
+  return (
+    <Link
+      href={`/drop-off/lessons/${lesson.id}`}
+      className="rounded-card border border-rule bg-canvas p-6 transition hover:border-terracotta/40"
+    >
+      <div className="text-xs uppercase tracking-[0.18em] text-muted">
+        One lesson to fix
+      </div>
+      <div className="mt-2 font-display text-3xl">
+        L{lesson.position}: {lesson.title}
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-ink">
+        Only {Math.round(lesson.completionPct)}% of members finish this lesson
+        in <em className="not-italic font-medium">{lesson.courseTitle}</em>.
+      </p>
+      <div className="mt-3 text-xs text-muted">
+        Open the zoom view to see why →
+      </div>
+    </Link>
+  );
+}
+
+function PulseTile({ pulse }: { pulse: PulseSummary | null }) {
+  if (!pulse) {
+    return (
+      <Link
+        href="/pulse"
+        className="block rounded-card border border-dashed border-rule bg-canvas/60 p-5 transition hover:border-terracotta/40"
+      >
+        <div className="text-xs uppercase tracking-[0.18em] text-muted">
+          This week&apos;s pulse
+        </div>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Activity time-series fills in after the first metrics sync.
+        </p>
+      </Link>
+    );
+  }
+  const direction =
+    pulse.regularsTrend === "up"
+      ? "up"
+      : pulse.regularsTrend === "down"
+        ? "down"
+        : "flat";
+  return (
+    <Link
+      href="/pulse"
+      className="block rounded-card border border-rule bg-canvas p-5 transition hover:border-terracotta/40"
+    >
+      <div className="flex items-baseline justify-between">
+        <div className="text-xs uppercase tracking-[0.18em] text-muted">
+          This week&apos;s pulse
+        </div>
+        <div className="text-xs text-muted/70">Open Pulse →</div>
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-ink">
+        <span className="font-medium">{pulse.regularsThisWeek ?? "—"}</span>{" "}
+        regulars this week —{" "}
+        {direction === "up"
+          ? "trending up vs last week."
+          : direction === "down"
+            ? "down vs last week. Worth a check-in post."
+            : "flat vs last week."}
+      </p>
+    </Link>
+  );
+}
+
+function SetupContent({
   totals,
   synced,
 }: {
@@ -205,14 +391,13 @@ function NextStepsCard({
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink">
         {allDone ? (
           <>
-            You&apos;re ready. Pulse and Member Check-ins land Days 8-10 of the
-            build sequence — your data is being collected in the background
-            until then.
+            You&apos;re ready. Pulse and Member Check-ins are pulling from
+            real progression data now.
           </>
         ) : (
           <>
-            The Pulse and Member Check-ins features (Days 8-10) need real
-            data to be useful. Each step below pulls another piece of it.
+            Member Check-ins and Pulse use real progression data. Each step
+            below pulls another piece of it.
           </>
         )}
       </p>
@@ -271,7 +456,6 @@ function ConnectFirstCard() {
 }
 
 function greetingForHour(now: Date, timezone: string): string {
-  // Use the creator's stored timezone so the greeting matches their day.
   const hour = Number.parseInt(
     now.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: timezone }),
     10,
@@ -280,4 +464,73 @@ function greetingForHour(now: Date, timezone: string): string {
   if (hour < 12) return "Good morning";
   if (hour < 17) return "Good afternoon";
   return "Good evening";
+}
+
+interface WorstLesson {
+  id: string;
+  title: string;
+  position: number;
+  completionPct: number;
+  courseTitle: string;
+}
+
+async function loadWorstLesson(communityId: string): Promise<WorstLesson | null> {
+  const rows = await db
+    .select({
+      id: lessons.id,
+      title: lessons.title,
+      position: lessons.positionInCourse,
+      completionPct: lessons.completionPct,
+      courseTitle: courses.title,
+    })
+    .from(lessons)
+    .innerJoin(courses, eq(courses.id, lessons.courseId))
+    .where(
+      and(
+        eq(courses.communityId, communityId),
+        isNotNull(lessons.completionPct),
+      ),
+    )
+    .orderBy(asc(lessons.completionPct));
+  const top = rows[0];
+  if (!top || top.completionPct === null) return null;
+  return {
+    id: top.id,
+    title: top.title,
+    position: top.position,
+    completionPct: Number(top.completionPct),
+    courseTitle: top.courseTitle,
+  };
+}
+
+interface PulseSummary {
+  regularsThisWeek: number | null;
+  regularsTrend: "up" | "down" | "flat" | null;
+}
+
+async function loadPulseSummary(
+  communityId: string,
+): Promise<PulseSummary | null> {
+  const rows = await db
+    .select({
+      metricDate: communityMetricsDaily.metricDate,
+      totalMembers: communityMetricsDaily.totalMembers,
+      activeMembers: communityMetricsDaily.activeMembers,
+      dailyActivities: communityMetricsDaily.dailyActivities,
+    })
+    .from(communityMetricsDaily)
+    .where(eq(communityMetricsDaily.communityId, communityId));
+  if (rows.length === 0) return null;
+  const points: DailyPoint[] = rows.map((r) => ({
+    date: r.metricDate,
+    totalMembers: r.totalMembers,
+    activeMembers: r.activeMembers,
+    dailyActivities: r.dailyActivities,
+  }));
+  const regulars = latestValue(points, "activeMembers");
+  const trend = trendOverWindow(points, "activeMembers", 7);
+  return {
+    regularsThisWeek: regulars,
+    regularsTrend: trend ? trend.trend : null,
+  };
 }
