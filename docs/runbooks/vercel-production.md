@@ -32,6 +32,22 @@ Cron routes (see root `vercel.json`):
 curl -sS -H "Authorization: Bearer $CRON_SECRET" "https://coursesuccess.io/api/cron/sync"
 ```
 
+## Auth.js (`/api/auth/error?error=Configuration`)
+
+If sign-in redirects here, `@auth/core` rejected the merged config:
+
+1. **`AUTH_SECRET`** (or legacy **`NEXTAUTH_SECRET`**) — must be set in Vercel Production. Same value everywhere; generate with `openssl rand -base64 32`.
+
+2. **`AUTH_URL`** (or legacy **`NEXTAUTH_URL`**) — must be exactly your public origin **`https://coursesuccess.io`** with **no trailing slash** and **no path** (not `https://coursesuccess.io/` and not nested under `/app`).
+
+3. **`trustHost`** is **`true`** in `src/auth/index.ts`; you normally do **not** need extra env tuning for proxies.
+
+4. **`RESEND_API_KEY`** — required to send magic links. Optional alias **`AUTH_RESEND_KEY`** is also read by the Resend provider.
+
+5. After changing env vars, **redeploy** so the Edge/serverless bundles see them.
+
+---
+
 ## Neon / database
 
 Production must use Neon connection strings (**not** localhost). Prefer:

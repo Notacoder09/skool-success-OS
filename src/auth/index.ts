@@ -14,10 +14,22 @@ import { buildMagicLinkEmail } from "./email-template";
 // We use Auth.js's built-in Resend provider but override
 // sendVerificationRequest so the email matches the V2 design
 // (terracotta accent, lowercase wordmark, one-paragraph copy).
+//
+// Production (Vercel) — set explicitly or sign-in blows up early with
+// `/api/auth/error?error=Configuration`:
+//   AUTH_SECRET — `openssl rand -base64 32`
+//   AUTH_URL — canonical site origin only, HTTPS, NO trailing slash
+//              (example: https://coursesuccess.io)
+// @auth/core `assertConfig` requires trustHost === true behind reverse
+// proxies; we set it in code instead of relying on env inference alone.
 
 const fromAddress = process.env.RESEND_FROM ?? "CourseSuccess OS <onboarding@resend.dev>";
 
+const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+
 export const authConfig = {
+  trustHost: true,
+  secret: authSecret,
   adapter: DrizzleAdapter(db, {
     usersTable: users,
     accountsTable: accounts,
@@ -31,7 +43,9 @@ export const authConfig = {
   },
   providers: [
     Resend({
-      apiKey: process.env.RESEND_API_KEY,
+      // Explicit key + fallback to Auth.js env convention (AUTH_RESEND_KEY).
+      apiKey:
+        process.env.RESEND_API_KEY ?? process.env.AUTH_RESEND_KEY,
       from: fromAddress,
       maxAge: 10 * 60, // 10 minute single-use link
       async sendVerificationRequest({ identifier: email, url }) {
