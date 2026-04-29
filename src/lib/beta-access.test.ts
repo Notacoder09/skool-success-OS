@@ -20,4 +20,16 @@ describe("isBetaEmailAllowed", () => {
   it("rejects whitespace-only email against a non-empty list", () => {
     assert.equal(isBetaEmailAllowed("   ", "a@b.com"), false);
   });
+
+  it("tolerates double-quoted env entries (common in hosting UIs)", () => {
+    const list = '"you@example.com"';
+    assert.equal(isBetaEmailAllowed("you@example.com", list), true);
+    assert.equal(isBetaEmailAllowed("YOu@EXAMPLE.com", list), true);
+  });
+
+  it("strips quotes around the entire comma-separated env value", () => {
+    const list = '"a@one.com, b@two.com "';
+    assert.equal(isBetaEmailAllowed("a@one.com", list), true);
+    assert.equal(isBetaEmailAllowed("b@two.com", list), true);
+  });
 });
