@@ -77,7 +77,7 @@ export async function loadDailyCheckIns(
     .select({
       memberId: memberProgress.memberId,
       completedLessons: sql<number>`sum(case when ${memberProgress.completedAt} is not null then 1 else 0 end)`,
-      inProgressLessons: sql<number>`sum(case when ${memberProgress.completedAt} is null and (${memberProgress.completionPct})::numeric > 0 then 1 else 0 end)`,
+      inProgressLessons: sql<number>`sum(case when ${memberProgress.completedAt} is null and ${memberProgress.lastActivityAt} is not null then 1 else 0 end)`,
       inProgressLastActivityAt: max(memberProgress.lastActivityAt).as(
         "in_progress_last_activity_at",
       ),

@@ -12,6 +12,9 @@ export interface FlatProgressionRow {
   completed: boolean;
   completionPct: number | null;
   completedAt: Date | null;
+  /** updated_at from Skool for this unit — set on completion AND on access.
+   *  Best proxy for "member last touched this lesson." */
+  lastActivityAt: Date | null;
 }
 
 // Walk all units returned for a single member's progression call. Skool
@@ -41,9 +44,13 @@ export function flattenProgressionUnits(
     const completed = meta.user_completed === 1 || meta.completed === 1;
     const completionPct = completed ? 100 : null;
     let completedAt: Date | null = null;
-    if (completed && unit.updated_at) {
+    let lastActivityAt: Date | null = null;
+    if (unit.updated_at) {
       const d = new Date(unit.updated_at);
-      if (!Number.isNaN(d.getTime())) completedAt = d;
+      if (!Number.isNaN(d.getTime())) {
+        lastActivityAt = d;
+        if (completed) completedAt = d;
+      }
     }
 
     out.push({
@@ -51,6 +58,7 @@ export function flattenProgressionUnits(
       completed,
       completionPct,
       completedAt,
+      lastActivityAt,
     });
 
     const children = (unit as SkoolUnit & { children?: SkoolUnit[] }).children;

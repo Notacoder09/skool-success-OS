@@ -244,7 +244,6 @@ export async function syncProgressionForKnownMembers(
 
       const flat = flattenProgressionUnits(progression);
       const now = new Date();
-      let memberHadActivity = false;
       let latestActivityAt: Date | null = null;
 
       for (const row of flat) {
@@ -261,6 +260,7 @@ export async function syncProgressionForKnownMembers(
                 ? row.completionPct.toFixed(2)
                 : null,
             completedAt: row.completedAt,
+            lastActivityAt: row.lastActivityAt,
             updatedAt: now,
           })
           .onConflictDoUpdate({
@@ -271,23 +271,24 @@ export async function syncProgressionForKnownMembers(
                   ? row.completionPct.toFixed(2)
                   : null,
               completedAt: row.completedAt,
+              lastActivityAt: row.lastActivityAt,
               updatedAt: now,
             },
           });
         result.upserted += 1;
 
-        if (row.completed && row.completedAt) {
-          memberHadActivity = true;
-          if (
-            !latestActivityAt ||
-            row.completedAt.getTime() > latestActivityAt.getTime()
-          ) {
-            latestActivityAt = row.completedAt;
-          }
+        // Track the latest activity across all units (completion or access).
+        const activityAt = row.completedAt ?? row.lastActivityAt;
+        if (
+          activityAt &&
+          (!latestActivityAt ||
+            activityAt.getTime() > latestActivityAt.getTime())
+        ) {
+          latestActivityAt = activityAt;
         }
       }
 
-      if (memberHadActivity && latestActivityAt) {
+      if (latestActivityAt) {
         await db
           .update(members)
           .set({ lastActiveAt: latestActivityAt, updatedAt: now })
