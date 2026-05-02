@@ -69,7 +69,8 @@ function PageHeader() {
         Member <em className="font-display not-italic">Check-ins</em>
       </h1>
       <p className="mt-3 max-w-2xl text-lg text-muted">
-        DMs to send today, ordered by relationship value — not just risk.
+        DMs to send today — quietest members first, then by who&apos;s most
+        winnable if there&apos;s a tie.
       </p>
     </header>
   );
@@ -108,16 +109,34 @@ function CheckInRowCard({
   row: CheckInRow;
   skoolDmUrl: string;
 }) {
+  const asOf = new Date();
   const display = row.name?.trim() || row.email || "Unknown member";
   const firstName = firstNameFrom(row.name);
   const drafts = draftAllTones({ firstName, flag: row.flag });
 
+  const tier = inactiveUrgencyTier(row, asOf);
+  const last = lastActiveDisplay(row, asOf);
+  const urgencyLine = urgencySilentLabel(row, asOf);
+  const showNeedsDm = tier === "critical";
+
+  const borderClass =
+    tier === "critical"
+      ? "border-y border-r border-rule border-l-[4px] border-l-red-600"
+      : tier === "warning"
+        ? "border-y border-r border-rule border-l-[4px] border-l-terracotta"
+        : "border border-rule";
+
+  const lastActiveColorClass =
+    tier === "critical"
+      ? "text-red-600"
+      : tier === "warning"
+        ? "text-terracotta-ink"
+        : "text-ink";
+
   return (
     <li
-      className={`rounded-card border p-5 transition ${
-        row.alreadyDraftedToday
-          ? "border-rule bg-canvas/60"
-          : "border-rule bg-canvas hover:border-terracotta/40"
+      className={`rounded-card p-5 transition ${borderClass} ${
+        row.alreadyDraftedToday ? "bg-canvas/60" : "bg-canvas hover:border-terracotta/40"
       }`}
     >
       <div className="flex items-start justify-between gap-6">
@@ -134,11 +153,45 @@ function CheckInRowCard({
                 {row.tier}
               </span>
             ) : null}
+            {showNeedsDm ? (
+              <span className="rounded-full bg-red-600/10 px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-[0.12em] text-red-700">
+                Needs DM
+              </span>
+            ) : null}
+            {urgencyLine ? (
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                  tier === "critical"
+                    ? "bg-red-600/10 text-red-700"
+                    : "bg-terracotta-soft/80 text-terracotta-ink"
+                }`}
+              >
+                {urgencyLine}
+              </span>
+            ) : null}
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-ink">
-            {row.flag.reason}.
+
+          <div className="mt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {tier === "warning" ? (
+                <span
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-terracotta-soft text-sm text-terracotta-ink"
+                  aria-hidden
+                >
+                  !
+                </span>
+              ) : null}
+              <p
+                className={`font-display text-3xl leading-tight sm:text-4xl ${lastActiveColorClass}`}
+              >
+                {last.primary}
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            {inactivitySubtext(row)}
           </p>
-          <p className="mt-1 text-xs text-muted">{relationshipSummary(row)}</p>
         </div>
         <DraftMessageButton
           memberId={row.memberId}
@@ -151,32 +204,74 @@ function CheckInRowCard({
   );
 }
 
-function relationshipSummary(row: CheckInRow): string {
-  const parts: string[] = [];
-  if (row.joinedAt) {
-    parts.push(`Member ${formatTenure(row.joinedAt)}`);
-  }
-  if (row.completedLessons > 0) {
-    parts.push(
-      `${row.completedLessons} lesson${row.completedLessons === 1 ? "" : "s"} completed`,
-    );
-  } else if (row.inProgressLessons > 0) {
-    parts.push(
-      `${row.inProgressLessons} in progress, none finished`,
-    );
-  } else {
-    parts.push("Hasn't started any lessons yet");
-  }
-  return parts.join(" · ");
+type ActivityTier = "fresh" | "warning" | "critical";
+
+function daysBetween(earlier: Date, later: Date): number {
+  return Math.max(0, Math.floor((later.getTime() - earlier.getTime()) / 86_400_000));
 }
 
-function formatTenure(joinedAt: Date): string {
-  const days = Math.max(1, Math.floor((Date.now() - joinedAt.getTime()) / 86_400_000));
-  if (days < 30) return `${days}d`;
-  const months = Math.round(days / 30);
-  if (months < 12) return `${months}mo`;
-  const years = Math.round(months / 12);
-  return `${years}y`;
+/** Strongest quiet signal (days) for styling — combines last activity, joins, stall, and risk flag. */
+function urgencyDays(row: CheckInRow, asOf: Date): number {
+  let u = 0;
+  if (row.lastActiveAt) {
+    u = Math.max(u, daysBetween(row.lastActiveAt, asOf));
+  } else if (row.joinedAt) {
+    u = Math.max(u, daysBetween(row.joinedAt, asOf));
+  }
+  if (row.flag.reasonKind === "stalled_mid_course" && row.flag.stallDays != null) {
+    u = Math.max(u, row.flag.stallDays);
+  }
+  if (row.flag.daysSinceActive != null) {
+    u = Math.max(u, row.flag.daysSinceActive);
+  }
+  if (row.flag.reasonKind === "brand_new_ghost") {
+    u = Math.max(u, row.flag.tenureDays);
+  }
+  return u;
+}
+
+function inactiveUrgencyTier(row: CheckInRow, asOf: Date): ActivityTier {
+  const u = urgencyDays(row, asOf);
+  if (u < 7) return "fresh";
+  if (u < 14) return "warning";
+  return "critical";
+}
+
+function lastActiveDisplay(row: CheckInRow, asOf: Date): { primary: string } {
+  if (!row.lastActiveAt) {
+    return { primary: "No course activity on record" };
+  }
+  const d = daysBetween(row.lastActiveAt, asOf);
+  if (d === 0) return { primary: "Last active today" };
+  if (d === 1) return { primary: "Last active yesterday" };
+  return { primary: `Last active ${d} days ago` };
+}
+
+/** Short badge line for 14+ days quiet (uses combined urgency). */
+function urgencySilentLabel(row: CheckInRow, asOf: Date): string | null {
+  const u = urgencyDays(row, asOf);
+  if (u < 14) return null;
+  return `${u} days silent`;
+}
+
+function inactivitySubtext(row: CheckInRow): string {
+  switch (row.flag.reasonKind) {
+    case "tenure_dropoff": {
+      const d = row.flag.daysSinceActive ?? 0;
+      return `Used to make progress in the course — silent for ${d} day${d === 1 ? "" : "s"}`;
+    }
+    case "brand_new_ghost": {
+      const t = row.flag.tenureDays;
+      return `Joined ${t} day${t === 1 ? "" : "s"} ago — hasn't opened a single lesson`;
+    }
+    case "stalled_mid_course": {
+      const sd = row.flag.stallDays ?? 0;
+      if (row.stalledLessonPosition != null) {
+        return `Progress stalled at Lesson ${row.stalledLessonPosition} for ${sd} day${sd === 1 ? "" : "s"}`;
+      }
+      return `Progress stalled for ${sd} day${sd === 1 ? "" : "s"}`;
+    }
+  }
 }
 
 function EmptyState({ lastSyncedAt }: { lastSyncedAt: Date | null }) {

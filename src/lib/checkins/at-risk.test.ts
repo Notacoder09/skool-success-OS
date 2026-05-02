@@ -47,6 +47,7 @@ describe("classifyMemberRisk", () => {
       assert.ok(flag);
       assert.equal(flag.reasonKind, "stalled_mid_course");
       assert.match(flag.reason, /11 days/);
+      assert.equal(flag.stallDays, 11);
     });
 
     it("does NOT flag stalled <7 days (not stalled enough yet)", () => {

@@ -12,6 +12,7 @@ export type {
   SkoolAnalyticsTokenResponse,
   SkoolAnalyticsWaitResponse,
   SkoolCourseTree,
+  SkoolGroupResponse,
   SkoolGroupCoursesResponse,
   SkoolMemberCoursePermissionsResponse,
   SkoolTimePoint,

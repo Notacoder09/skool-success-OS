@@ -133,12 +133,14 @@ export default async function LessonZoomPage({ params }: PageProps) {
   const memberRecords = memberRows.map((m) => {
     const p = progressByMemberId.get(m.id);
     const pct = p?.completionPct !== undefined && p?.completionPct !== null ? Number(p.completionPct) : null;
+    const completedAt = p?.completedAt ?? null;
+    const lastActivityAt = p?.lastActivityAt ?? null;
     return {
       ...m,
       progressPct: pct,
-      completedAt: p?.completedAt ?? null,
-      lastActivityAt: p?.lastActivityAt ?? null,
-      state: classify(pct, p?.completedAt ?? null),
+      completedAt,
+      lastActivityAt,
+      state: classify(pct, completedAt, lastActivityAt),
     };
   });
 
@@ -475,9 +477,15 @@ function NeighbourCell({
 
 type MemberState = "completed" | "incomplete" | "not_started";
 
-function classify(pct: number | null, completedAt: Date | null): MemberState {
+function classify(
+  pct: number | null,
+  completedAt: Date | null,
+  lastActivityAt: Date | null,
+): MemberState {
   if (completedAt !== null) return "completed";
   if (pct !== null && pct > 0) return "incomplete";
+  // Sync writes last_activity_at from Skool updated_at even when % is missing
+  if (lastActivityAt !== null) return "incomplete";
   return "not_started";
 }
 

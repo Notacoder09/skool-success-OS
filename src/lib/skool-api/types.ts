@@ -29,10 +29,16 @@ export interface SkoolUnitMetadata {
   video_thumbnail?: string;
   video_len_ms?: number;
   num_modules?: number;
-  user_completed?: number;
+  user_completed?: number | boolean | string;
   user_has_access?: number;
   has_access?: number;
-  completed?: number;
+  completed?: number | boolean | string;
+  /** Fraction 0–1 or percent 0–100 — seen on progression payloads */
+  progress?: number;
+  watch_progress?: number;
+  completion_progress?: number;
+  percent_complete?: number;
+  video_progress?: number;
   privacy?: number;
   resources?: string;
   [k: string]: unknown;
@@ -48,8 +54,23 @@ export interface SkoolGroupCoursesResponse {
   num_all_courses: number;
 }
 
+export interface SkoolGroupResponse {
+  id?: string;
+  name?: string;
+  title?: string;
+  group_name?: string;
+  display_name?: string;
+  slug?: string;
+  [k: string]: unknown;
+}
+
 export interface SkoolMemberCoursePermissionsResponse {
-  courses: SkoolUnit[];
+  /**
+   * Often mirrors `GET /courses/{id}` — each entry may be a full
+   * {@link SkoolCourseTree} (`{ course, children }`) even when typed
+   * loosely as {@link SkoolUnit} in older recon.
+   */
+  courses: Array<SkoolUnit | SkoolCourseTree>;
   num_all_courses: number;
 }
 

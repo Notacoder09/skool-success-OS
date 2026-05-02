@@ -122,6 +122,15 @@ export async function syncCommunity(opts: SyncOptions): Promise<SyncRunSummary> 
     // --- Step A: course + lesson structure --------------------------------
     const courseList = await client.listGroupCourses(opts.skoolGroupId);
     counters.apiCalls += 1;
+    const group = await client.getGroup(opts.skoolGroupId);
+    counters.apiCalls += 1;
+    const communityName = extractGroupName(group);
+    if (communityName) {
+      await db
+        .update(communities)
+        .set({ name: communityName })
+        .where(eq(communities.id, opts.communityId));
+    }
 
     for (const skoolCourse of courseList.courses) {
       const courseRowId = await upsertCourse(opts.communityId, skoolCourse);
@@ -372,4 +381,19 @@ async function upsertLesson(
         lastSyncedAt: now,
       },
     });
+}
+
+function extractGroupName(group: Record<string, unknown>): string | null {
+  const candidate =
+    readNonEmptyString(group["name"]) ??
+    readNonEmptyString(group["group_name"]) ??
+    readNonEmptyString(group["title"]) ??
+    readNonEmptyString(group["display_name"]);
+  return candidate ?? null;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

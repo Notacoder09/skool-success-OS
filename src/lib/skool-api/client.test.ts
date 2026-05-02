@@ -152,3 +152,17 @@ describe("SkoolClient.getAdminMetrics", () => {
     assert.equal(metrics.total_members?.[0]?.value, 3);
   });
 });
+
+describe("SkoolClient.getGroup", () => {
+  it("returns group metadata with the community name", async () => {
+    const client = new SkoolClient({
+      cookies: COOKIES,
+      fetchImpl: makeFetch({
+        "/groups/g": () => jsonResponse({ id: "g", name: "Useful Coding" }),
+      }),
+    });
+
+    const group = await client.getGroup("g");
+    assert.equal(group.name, "Useful Coding");
+  });
+});

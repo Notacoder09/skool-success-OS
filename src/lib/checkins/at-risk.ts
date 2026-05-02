@@ -50,6 +50,8 @@ export interface MemberRiskFlag {
   daysSinceActive: number | null;
   /** Days since they joined. Used by the ranker. */
   tenureDays: number;
+  /** Set when {@link reasonKind} is `stalled_mid_course` — days stuck on current lesson. */
+  stallDays?: number;
 }
 
 /**
@@ -100,6 +102,7 @@ export function classifyMemberRisk(
         reason: `Started a lesson but hasn't moved in ${stallDays} day${stallDays === 1 ? "" : "s"}`,
         daysSinceActive,
         tenureDays: tenureDaysOrZero(tenureDays),
+        stallDays,
       };
     }
   }

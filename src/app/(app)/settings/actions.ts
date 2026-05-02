@@ -59,11 +59,11 @@ export async function connectSkool(formData: FormData): Promise<ConnectResult> {
   // of the group: listing courses.
   const cookies: SkoolCookies = { authToken, clientId };
   const client = new SkoolClient({ cookies });
-  let firstCourseTitle: string | null = null;
+  let communityName: string | null = null;
   try {
-    const res = await client.listGroupCourses(groupId);
-    firstCourseTitle =
-      (res.courses[0]?.metadata?.title as string | undefined) ?? null;
+    await client.listGroupCourses(groupId);
+    const group = await client.getGroup(groupId);
+    communityName = extractGroupName(group);
   } catch (err) {
     if (err instanceof SkoolAuthError) {
       return { ok: false, error: "Those cookies didn't work. Re-copy from Skool." };
@@ -134,20 +134,35 @@ export async function connectSkool(formData: FormData): Promise<ConnectResult> {
     .values({
       creatorId: creatorRow.id,
       skoolGroupId: groupId,
-      name: firstCourseTitle ?? null,
+      name: communityName,
       isPrimary: true,
     })
     .onConflictDoUpdate({
       target: [communities.creatorId, communities.skoolGroupId],
       set: {
-        name: firstCourseTitle ?? null,
+        name: communityName,
       },
     });
 
   revalidatePath("/settings");
   revalidatePath("/today");
   revalidatePath("/drop-off");
-  return { ok: true, communityName: firstCourseTitle };
+  return { ok: true, communityName };
+}
+
+function extractGroupName(group: Record<string, unknown>): string | null {
+  const candidate =
+    readNonEmptyString(group["name"]) ??
+    readNonEmptyString(group["group_name"]) ??
+    readNonEmptyString(group["title"]) ??
+    readNonEmptyString(group["display_name"]);
+  return candidate ?? null;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 // ---------------------------------------------------------------------------

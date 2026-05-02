@@ -261,6 +261,7 @@ export async function syncProgressionForKnownMembers(
                 ? row.completionPct.toFixed(2)
                 : null,
             completedAt: row.completedAt,
+            lastActivityAt: row.lastActivityAt,
             updatedAt: now,
           })
           .onConflictDoUpdate({
@@ -271,18 +272,17 @@ export async function syncProgressionForKnownMembers(
                   ? row.completionPct.toFixed(2)
                   : null,
               completedAt: row.completedAt,
+              lastActivityAt: row.lastActivityAt,
               updatedAt: now,
             },
           });
         result.upserted += 1;
 
-        if (row.completed && row.completedAt) {
+        const stamp = row.completedAt ?? row.lastActivityAt;
+        if (stamp) {
           memberHadActivity = true;
-          if (
-            !latestActivityAt ||
-            row.completedAt.getTime() > latestActivityAt.getTime()
-          ) {
-            latestActivityAt = row.completedAt;
+          if (!latestActivityAt || stamp.getTime() > latestActivityAt.getTime()) {
+            latestActivityAt = stamp;
           }
         }
       }

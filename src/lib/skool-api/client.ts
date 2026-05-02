@@ -12,6 +12,7 @@ import type {
   SkoolAnalyticsTokenResponse,
   SkoolAnalyticsWaitResponse,
   SkoolCourseTree,
+  SkoolGroupResponse,
   SkoolGroupCoursesResponse,
   SkoolMemberCoursePermissionsResponse,
 } from "./types";
@@ -120,18 +121,34 @@ export class SkoolClient {
     );
   }
 
+  /** GET /groups/{group_id} → group metadata including community name. */
+  getGroup(groupId: string): Promise<SkoolGroupResponse> {
+    return this.get<SkoolGroupResponse>(`/groups/${encodeURIComponent(groupId)}`);
+  }
+
   /**
    * GET /groups/{group_id}/member-course-permissions?progression=true&member={id}
    * → per-member course progression.
    */
-  getMemberProgression(
+  async getMemberProgression(
     groupId: string,
     memberId: string,
   ): Promise<SkoolMemberCoursePermissionsResponse> {
     const qs = new URLSearchParams({ progression: "true", member: memberId });
-    return this.get<SkoolMemberCoursePermissionsResponse>(
-      `/groups/${encodeURIComponent(groupId)}/member-course-permissions?${qs.toString()}`,
-    );
+    const path = `/groups/${encodeURIComponent(groupId)}/member-course-permissions?${qs.toString()}`;
+    const data = await this.get<SkoolMemberCoursePermissionsResponse>(path);
+    if (process.env.SKOOL_DEBUG_PROGRESSION === "1") {
+      try {
+        console.log(
+          "[skool] getMemberProgression raw",
+          memberId,
+          JSON.stringify(data).slice(0, 12_000),
+        );
+      } catch {
+        console.log("[skool] getMemberProgression (unserializable)", memberId);
+      }
+    }
+    return data;
   }
 
   /**

@@ -1,11 +1,11 @@
-import { and, eq, gte, max, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, max, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { courses, lessons, members, memberProgress } from "@/db/schema/communities";
 import { memberCheckIns } from "@/db/schema/reports";
 
 import { classifyMemberRisk, type MemberRiskFlag } from "./at-risk";
-import { rankCheckIns, DAILY_CHECK_IN_CAP } from "./rank";
+import { DAILY_CHECK_IN_CAP, rankScore } from "./rank";
 
 // Server-side loader that produces the daily check-in list for a
 // community. Computes at-risk on the fly from `members` +
@@ -30,6 +30,9 @@ export interface CheckInRow {
   /** Has the creator already copied a draft for this member in the
    *  last 24h? Drives the "Drafted today" pill in the UI. */
   alreadyDraftedToday: boolean;
+  /** In-progress lesson with oldest touch — for stalled_mid_course copy. */
+  stalledLessonPosition: number | null;
+  stalledLessonTitle: string | null;
 }
 
 interface LoadOptions {
@@ -156,21 +159,126 @@ export async function loadDailyCheckIns(
       inProgressLessons: agg.inProgressLessons,
       flag,
       alreadyDraftedToday: draftedToday.has(m.id),
+      stalledLessonPosition: null,
+      stalledLessonTitle: null,
     });
   }
 
-  // Rank. We push already-drafted members down so the creator works
-  // through the rest of the list before re-DMing the same person.
-  const rankedNotDrafted = rankCheckIns(
+  const stalledIds = candidates
+    .filter((c) => c.flag.reasonKind === "stalled_mid_course")
+    .map((c) => c.memberId);
+  const stalledLessons = await loadStalledLessonContexts(
+    opts.communityId,
+    stalledIds,
+  );
+  for (const c of candidates) {
+    if (c.flag.reasonKind !== "stalled_mid_course") continue;
+    const ctx = stalledLessons.get(c.memberId);
+    if (ctx) {
+      c.stalledLessonPosition = ctx.position;
+      c.stalledLessonTitle = ctx.title;
+    }
+  }
+
+  // Longest inactive first (most urgent at top). Already-drafted
+  // members stay below fresh ones; tie-break by winnability score.
+  const rankedNotDrafted = sortCheckInsByInactiveFirst(
     candidates.filter((c) => !c.alreadyDraftedToday),
+    asOf,
     cap,
   );
-  const rankedDrafted = rankCheckIns(
+  const rankedDrafted = sortCheckInsByInactiveFirst(
     candidates.filter((c) => c.alreadyDraftedToday),
+    asOf,
     cap,
   );
 
   return [...rankedNotDrafted, ...rankedDrafted].slice(0, cap);
+}
+
+function daysBetween(earlier: Date, later: Date): number {
+  return Math.max(0, Math.floor((later.getTime() - earlier.getTime()) / 86_400_000));
+}
+
+/** Primary sort: longest time since last known activity (or since join if none). */
+function inactiveDaysForSort(row: CheckInRow, asOf: Date): number {
+  if (row.lastActiveAt) return daysBetween(row.lastActiveAt, asOf);
+  if (row.joinedAt) return daysBetween(row.joinedAt, asOf);
+  return 0;
+}
+
+function sortCheckInsByInactiveFirst(
+  rows: CheckInRow[],
+  asOf: Date,
+  cap: number,
+): CheckInRow[] {
+  return rows
+    .map((x, i) => ({
+      x,
+      i,
+      inactive: inactiveDaysForSort(x, asOf),
+      score: rankScore({
+        flag: x.flag,
+        completedLessons: x.completedLessons,
+        ltv: x.ltv,
+      }),
+    }))
+    .sort((a, b) => {
+      if (b.inactive !== a.inactive) return b.inactive - a.inactive;
+      if (b.score !== a.score) return b.score - a.score;
+      return a.i - b.i;
+    })
+    .slice(0, cap)
+    .map(({ x }) => x);
+}
+
+async function loadStalledLessonContexts(
+  communityId: string,
+  memberIds: string[],
+): Promise<Map<string, { position: number; title: string }>> {
+  const out = new Map<string, { position: number; title: string }>();
+  if (memberIds.length === 0) return out;
+
+  const rows = await db
+    .select({
+      memberId: memberProgress.memberId,
+      position: lessons.positionInCourse,
+      title: lessons.title,
+      lastAt: memberProgress.lastActivityAt,
+    })
+    .from(memberProgress)
+    .innerJoin(lessons, eq(lessons.id, memberProgress.lessonId))
+    .innerJoin(courses, eq(courses.id, lessons.courseId))
+    .where(
+      and(
+        eq(courses.communityId, communityId),
+        inArray(memberProgress.memberId, memberIds),
+        isNull(memberProgress.completedAt),
+        sql`coalesce((${memberProgress.completionPct})::numeric, 0) > 0`,
+      ),
+    );
+
+  const byMember = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const arr = byMember.get(r.memberId) ?? [];
+    arr.push(r);
+    byMember.set(r.memberId, arr);
+  }
+
+  for (const [memberId, arr] of byMember) {
+    arr.sort((a, b) => {
+      const at = a.lastAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      const bt = b.lastAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      if (at !== bt) return at - bt;
+      return a.position - b.position;
+    });
+    const pick = arr[0];
+    if (pick) {
+      out.set(memberId, { position: pick.position, title: pick.title });
+    }
+  }
+
+  return out;
 }
 
 /**
