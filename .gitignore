@@ -49,3 +49,4 @@ drizzle/.snapshots/
 # local skool recon scratch / cookies
 *.cookies.json
 scratch/
+.claude/
